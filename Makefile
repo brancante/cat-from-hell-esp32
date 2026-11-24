@@ -1,4 +1,4 @@
-# Cat from Hell: everyday commands. Run `. ~/esp/esp-idf/export.sh` once per terminal first (your existing ESP-IDF).
+# Cat from Hell: everyday commands. Run `. ~/esp/esp-idf-v5.3/export.sh` once per terminal first.
 PORT ?= $(firstword $(wildcard /dev/cu.usbmodem*))
 .PHONY: test demo build flash monitor
 test:     ; cc -std=c11 -Wall -Wextra -Werror -Icomponents/game_core/include tests/test_game.c components/game_core/game.c -o /tmp/cfh_test && /tmp/cfh_test

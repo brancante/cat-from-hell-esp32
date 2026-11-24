@@ -13,7 +13,7 @@ Fast Strike taps spend pizza energy to shoot claws. Twelve phases, a meme (pictu
     make demo    # autopilot plays the game core and prints progress
 
 ## Build and flash (Mac)
-    . ~/esp/esp-idf/export.sh   # your existing ESP-IDF
+    . ~/esp/esp-idf-v5.3/export.sh   # your existing ESP-IDF
     make build
     make flash                  # finds /dev/cu.usbmodem* automatically
 
