@@ -1,0 +1,120 @@
+// ====================================================================================================================================================================
+// Do NOT export the "ui_img_manager.h" file and the "ui_img_manager.cpp" from squareline studio, this will break the code and result in compiler errors !!!!!!!!!!!!!!
+//    Keep the "ui_img_manager.h" file and the "ui_img_manager.cpp" files supplied together with the sketch!!!
+// particularities of the program: 
+// - images are loaded in Ffat under directory assets. For this you need another program, A Ffat uploader. Do not compile with the erase all flash on flashing since this will erase the Ffat also
+// - On startup the sketch loads all images from Ffat to PSram for better lvgl speed. (library lv_port_fs_ffat.h)
+// - The LVGL task runs on core 0 (configured in lvgl_arduino_v4.h), the NMEA2000 loop runs on core 1. This helps performance of the NMEA2000 decoding (less lost sentences)
+// - In lvgl_arduino_v4.h we keep the UI task priority high to optimise display and touch handling
+// - for control and visualising of the raymarine EVO pilot, proprietary raymarine pgn's are used
+// - unit settings are stored in flash
+// ====================================================================================================================================================================
+
+#include <Arduino.h>
+
+#include <string.h>
+
+#include "freertos/FreeRTOS.h" // included these 2 lines for the beepr task
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+
+#include <math.h>
+#include <lvgl.h>
+#include "lvgl_arduino_v4.h"
+#include <ui.h>
+#include <FFat.h>
+#include "lv_port_fs_ffat.h"
+#include "ui_img_manager.h"
+#include "rev4_board.h"
+#define ESP32_CAN_RX_PIN GPIO_NUM_0 // gpio pins for can bus
+#define ESP32_CAN_TX_PIN GPIO_NUM_6 // gpio pins for can bus
+#include <NMEA2000_esp32_twai.h>
+#include <NMEA2000.h>
+tNMEA2000 &NMEA2000 = *(new NMEA2000_esp32_twai());
+#include <n2k.h>
+//#include <N2Kwifi.h>  // when working over wifi, uncomment this line and also uncomment lines 525, 526, 544, 545, 551, 552
+
+void DoSetBacklight(lv_event_t * e);
+static void ui_update_timer_cb(lv_timer_t * timer); // create a timer for display-related UI refresh work; the LVGL task itself is pinned in lvgl_arduino_v4.cpp
+static void BacklightDialog_CancelPending(const char * reason = nullptr);
+static void BacklightDialog_GestureGuard(lv_event_t * e);
+static void BacklightDialog_ResetInputState();
+static void PauseUiUpdatesForSwipeAnimation();
+static void RegisterBacklightDialogGuards();
+
+uint32_t Touch_Button_Clamp = 1000, Button_Clamp_millis; //Touch_Button_Clamp clamps the touchbutton state for the number of millis specified, to give time at the AP to conform the status set by the buttons
+
+// contain the abbreviations of the units chosen in the settings panel (avoid Arduino String to reduce heap churn)
+char WindUnitStr[8] = "";
+char WindUnitStr2[8] = "";      // first two characters of WindUnitStr if it is knots, else WindUnitStr2 is the same as WindUnitStr
+char SpeedUnitStr[8] = "";
+char DepthUnitStr[4] = "";
+char DistanceUnitStr[4] = "";
+N2K::ApMode Old_Auto_Mode;
+
+uint32_t Beep_on_millis, Beep_off_millis, TimeOut_millis;  // timing variables for dialog (warning) screen
+uint32_t Beep_on_timeout = 100, Beep_off_timeout = 300, TimeOut_millis_timeout = 8000;  // timeout variables for dialog (warning) screen in pretrack mode
+
+bool BacklightDialog_Active = false, oldBacklightDialog_Active = false;
+uint32_t BacklightDialog_Timeout;
+
+static bool BacklightDialog_RequestPending = false;
+static uint32_t BacklightDialog_RequestMillis = 0;
+static uint32_t BacklightDialog_GestureBusyUntil = 0;
+static lv_obj_t *BacklightDialog_RequestScreen = nullptr;
+static constexpr uint32_t BacklightDialog_TouchSettleMs = 180;
+static constexpr uint32_t BacklightDialog_GestureGuardMs = 850;
+static constexpr uint32_t ScreenSwipePauseMs = 550;  // slightly longer than the 500 ms screen swipe animation
+static lv_timer_t *g_ui_update_timer = nullptr;
+static lv_timer_t *g_ui_update_resume_timer = nullptr;
+static bool g_pause_live_screen_updates = false;
+
+static int16_t V4_LastBacklightSliderValue = -1;
+
+// Rev 4 board ownership lives in rev4_board.{h,cpp}.
+// Keep wrappers here so the rest of the sketch remains unchanged.
+void Beeper_Start(uint32_t on_ms, uint32_t off_ms, uint16_t repeat) {
+  Rev4Board::BeeperStart(on_ms, off_ms, repeat);
+}
+
+void Beeper_Stop() {
+  Rev4Board::BeeperStop();
+}
+
+void Beep(){
+  Rev4Board::BeepShort();
+}
+
+byte Dialog_Status; // global variable to store the Do_Show_Dialog screen Warning_Type (determines behaviour of the screen)
+lv_obj_t *Return_Screen;
+
+static void BacklightDialog_CancelPending(const char * reason) {
+  (void)reason;
+  BacklightDialog_RequestPending = false;
+  BacklightDialog_RequestMillis = 0;
+  BacklightDialog_GestureBusyUntil = 0;
+  BacklightDialog_RequestScreen = nullptr;
+}
+
+static void BacklightDialog_GestureGuard(lv_event_t * e) {
+  (void)e;
+  BacklightDialog_GestureBusyUntil = millis() + BacklightDialog_GestureGuardMs;
+  if (BacklightDialog_RequestPending && !BacklightDialog_Active) {
+    BacklightDialog_CancelPending("gesture overlap");
+  }
+}
+
+static void BacklightDialog_ResetInputState() {
+  lv_indev_t * indev = lv_indev_get_act();
+  if (indev != nullptr) {
+    lv_indev_reset(indev, nullptr);
+  }
+}
+
+static void RegisterBacklightDialogGuards() {
+  lv_obj_t * screens[] = {
+    ui_ScrWind,
+    ui_ScrAutopilot,
+    ui_ScrXTE,
+    ui_ScrNav,
+    ui_ScrAppWind,
