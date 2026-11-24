@@ -15,8 +15,11 @@ static uint16_t s_fb[GAME_W * GAME_H];                  // 240x240 draw buffer (
 #define PLAY_H 192                                      // logical rows above the button strip (physical 384)
 
 static void rect(int x, int y, int w, int h, uint16_t c) {
-    if (x < 0) { w += x; x = 0; } if (y < 0) { h += y; y = 0; }
-    if (x + w > GAME_W) w = GAME_W - x; if (y + h > GAME_H) h = GAME_H - y;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > GAME_W) { w = GAME_W - x; }
+    if (y + h > GAME_H) { h = GAME_H - y; }
+    if (w <= 0 || h <= 0) { return; }
     for (int j = 0; j < h; j++) { uint16_t *p = &s_fb[(y + j) * GAME_W + x]; for (int i = 0; i < w; i++) p[i] = c; }
 }
 
