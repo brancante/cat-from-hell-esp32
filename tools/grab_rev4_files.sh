@@ -13,7 +13,8 @@ OUT="$W/out"; mkdir -p "$OUT"
 find ref4 \( -ipath '*Version4*' -o -ipath '*Version 4*' \) -type f \( -iname 'rev4_board*' -o -iname 'gt911*' -o -iname 'lvgl_arduino_v4*' -o -iname 'lvgl_port*' -o -iname '*pins*' -o -iname '*board*' \) -size -300k -print0 | while IFS= read -r -d '' f; do cp "$f" "$OUT/$(basename "$f")"; done
 find ref4 -type f \( -iname '*st7701*' -o -iname 'Arduino_RGB_Display*' -o -iname 'Arduino_ESP32RGBPanel*' \) -size -300k -print0 | while IFS= read -r -d '' f; do cp "$f" "$OUT/lib_$(basename "$f")"; done
 # the main sketch's top 120 lines (pins/consts) if present
-for f in $(find ref4 -ipath '*Version4*' -iname '*.ino' | head -1); do head -120 "$f" > "$OUT/main_sketch_head.txt"; done
+INO=$(find ref4 -ipath '*Version4*' -iname '*.ino' | head -1)
+[ -n "$INO" ] && head -120 "$INO" > "$OUT/main_sketch_head.txt"
 ls -la "$OUT"; du -sh "$OUT"
 cd "$REPO"; CUR=$(git branch --show-current)
 git switch -C demo-excerpts -q || exit 1
