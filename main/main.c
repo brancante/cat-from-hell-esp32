@@ -30,7 +30,17 @@ static void play_sound(uint32_t ev) {
 void app_main(void) {
     ESP_ERROR_CHECK(nvs_flash_init());
     esp_err_t e = board_init();
-    if (e != ESP_OK) { ESP_LOGE(TAG, "board_init failed (%s). Game logic is tested on the host; finish Milestone 0.", esp_err_to_name(e)); return; }
+    if (e != ESP_OK) { ESP_LOGE(TAG, "board_init failed (%s).", esp_err_to_name(e)); return; }
+#if !BOARD_LCD_INIT_KNOWN
+    // Hardware self-test until the display works: print touches and beep on every new touch.
+    bool was = false;
+    for (;;) {
+        touch_pt_t p[5]; int n = board_touch_read(p, 5);
+        if (n && !was) board_beep(0, 60);
+        if (n) ESP_LOGI(TAG, "touch x=%d y=%d (fingers=%d)", p[0].x, p[0].y, n);
+        was = n > 0; vTaskDelay(pdMS_TO_TICKS(20));
+    }
+#endif
     static game_t g; game_init(&g, (uint32_t)esp_timer_get_time(), 0);
     int64_t next = esp_timer_get_time();
     const int64_t dt = 1000000 / GAME_STEP_HZ;

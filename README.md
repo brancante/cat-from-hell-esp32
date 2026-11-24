@@ -17,7 +17,10 @@ Fast Strike taps spend pizza energy to shoot claws. Twelve phases, a meme (pictu
     make build
     make flash                  # finds /dev/cu.usbmodem* automatically
 
-## Milestone 0 (next)
+## Milestone 0 (in progress)
+Pins are from the Waveshare wiki (see `board_pins.h`); touch + expander + buzzer are implemented. Display waits for the vendor ST7701S init sequence: run `tools/grab_waveshare_demo.sh`.
+
+### Old text
 Fill `components/board/include/board_pins.h` from the Waveshare wiki/schematic, set `BOARD_PINS_VERIFIED 1`, then implement
 `board_init` (ST7701S via IO expander, RGB panel, GT911, buzzer) and show colour bars plus a touch dot.
 
