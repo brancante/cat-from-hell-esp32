@@ -3,12 +3,12 @@
 # (GPL-3.0: we read hardware facts only: pins, timings, init array) and pushes a short excerpt file to the
 # branch demo-excerpts so Claude can read it. Run from the repo folder:  bash tools/grab_waveshare_demo.sh
 # Optional: WITH_ZIP=1 also tries Waveshare's own demo zip (large; needs ~1 GB free).
-set -euo pipefail
+set -uo pipefail   # no -e: grep returns 1 when nothing matches, which must not stop the script
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 cd "$W"
 echo "free disk: $(df -h . | awk 'NR==2{print $4}')"
-git clone -q --depth 1 --filter=blob:none --sparse https://github.com/FrancisSailor/NMEA2000-DISPLAY-on-ESP32S3 ref4
+git clone -q --depth 1 --filter=blob:none --sparse https://github.com/FrancisSailor/NMEA2000-DISPLAY-on-ESP32S3 ref4 || { echo "clone failed"; exit 1; }
 git -C ref4 sparse-checkout set src
 echo "downloaded: $(du -sh ref4 | cut -f1)"
 if [ "${WITH_ZIP:-0}" = 1 ]; then
@@ -29,8 +29,8 @@ CODE=(--include=*.h --include=*.c --include=*.cpp --include=*.hpp --include=*.in
 echo "excerpt: $(wc -l < "$OUT") lines, $(du -h "$OUT" | cut -f1)"
 cd "$REPO"
 CUR=$(git branch --show-current)
-git switch -C demo-excerpts -q
+git switch -C demo-excerpts -q || exit 1
 mkdir -p docs && cp "$OUT" docs/waveshare-demo-excerpts.txt
-git add docs/waveshare-demo-excerpts.txt && git commit -qm "Demo excerpts for display bring-up" && git push -qf -u origin demo-excerpts
+git add docs/waveshare-demo-excerpts.txt && git commit -qm "Demo excerpts for display bring-up" && git push -qf -u origin demo-excerpts || { echo "push failed"; exit 1; }
 git switch -q "$CUR"
 echo "Done: pushed branch demo-excerpts. Tell Claude."
