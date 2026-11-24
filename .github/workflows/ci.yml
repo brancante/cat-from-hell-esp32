@@ -1,0 +1,16 @@
+name: CI
+on: [push, pull_request]
+permissions: { contents: read }
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test && make demo
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:release-v5.3
+    steps:
+      - uses: actions/checkout@v4
+      - shell: bash
+        run: . /opt/esp/idf/export.sh && idf.py set-target esp32s3 && idf.py build

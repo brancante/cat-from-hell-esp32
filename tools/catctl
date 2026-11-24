@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""catctl: talk to the board's USB serial console from the Mac terminal.
+Examples:  ./catctl memes set 1 https://youtu.be/xxxx   ./catctl set lang pt   ./catctl unlock all   ./catctl reset
+Needs: pip3 install pyserial.  Console protocol (firmware side, milestone 3): one text line per command, board answers 'ok' or 'err <why>'."""
+import glob, sys
+try:
+    import serial
+except ImportError:
+    sys.exit("run: pip3 install pyserial")
+ports = sorted(glob.glob("/dev/cu.usbmodem*"))
+if not ports: sys.exit("board not found: plug in the USB-C cable")
+if len(sys.argv) < 2: sys.exit(__doc__)
+with serial.Serial(ports[0], 115200, timeout=2) as s:
+    s.write((" ".join(sys.argv[1:]) + "\n").encode()); print(s.readline().decode().strip() or "(no answer: firmware console not built yet)")
