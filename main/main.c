@@ -8,6 +8,7 @@
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "board.h"
 #include "game.h"
 #include "sprites.h"
@@ -210,6 +211,30 @@ static void hi_save(uint32_t v) { nvs_handle_t h; if (nvs_open("cat", NVS_READWR
 
 typedef enum { UI_TITLE, UI_PLAY, UI_OVER } ui_t;
 
+// What the render task needs, copied from the logic loop under a mutex so the two never touch the same data.
+typedef struct { game_t g; ui_t ui; game_input_t in; uint32_t hi, idle; bool new_best; int banner; } view_t;
+static view_t s_view; static SemaphoreHandle_t s_view_mx;
+
+// Render task (core 1): draws the latest snapshot at the display's pace; game logic keeps its own steady 60 Hz on core 0.
+static void render_task(void *arg) {
+    static view_t v; int64_t fps_t = esp_timer_get_time(); int frames = 0;
+    for (;;) {
+        xSemaphoreTake(s_view_mx, portMAX_DELAY); v = s_view; xSemaphoreGive(s_view_mx);
+        fb = board_back_buffer();
+        if (fb) {
+            if (v.ui == UI_TITLE) { world_room(v.idle * 3); controls(&v.in); title_screen(v.idle, v.hi); }
+            else {
+                play_scene(&v.g, v.hi, &v.in);
+                if (v.banner > 0) { text(&font_big, 240, 150, "FASE COMPLETA!", RGB(255, 230, 90), true); text(&font_small, 240, 192, "PHASE CLEAR!", RGB(255, 255, 255), true); }
+                if (v.ui == UI_OVER) { over_screen(&v.g, v.hi, v.new_best); }
+            }
+            board_flip(); frames++;
+        } else { vTaskDelay(pdMS_TO_TICKS(10)); }
+        int64_t now = esp_timer_get_time();
+        if (now - fps_t >= 1000000) { ESP_LOGI(TAG, "fps %d score %u phase %d", frames, (unsigned)v.g.score, v.g.phase + 1); frames = 0; fps_t = now; }
+    }
+}
+
 void app_main(void) {
     esp_err_t ne = nvs_flash_init();
     if (ne == ESP_ERR_NVS_NO_FREE_PAGES || ne == ESP_ERR_NVS_NEW_VERSION_FOUND) { nvs_flash_erase(); nvs_flash_init(); }
@@ -217,7 +242,10 @@ void app_main(void) {
     if (e != ESP_OK) { ESP_LOGE(TAG, "board_init failed (%s)", esp_err_to_name(e)); return; }
     static game_t g; game_init(&g, (uint32_t)esp_timer_get_time(), 0);
     uint32_t hi = hi_load(); bool new_best = false; ui_t ui = UI_TITLE;
-    int64_t next = esp_timer_get_time(), last_present = next, ui_t0 = next, fps_t = next; int frames = 0, fps = 0;
+    s_view_mx = xSemaphoreCreateMutex();
+    s_view.g = g; s_view.ui = ui; s_view.hi = hi;
+    xTaskCreatePinnedToCore(render_task, "render", 8192, NULL, 5, NULL, 1);
+    int64_t next = esp_timer_get_time(), ui_t0 = next;
     bool prev_down = true; int banner = 0; uint32_t idle = 0;
     const int64_t dt = 1000000 / GAME_STEP_HZ;
     for (;;) {
@@ -231,7 +259,8 @@ void app_main(void) {
         if (ui == UI_PLAY) {
             uint32_t ev = game_step(&g, in);
             play_sound(ev);
-            if (ev & EV_PHASE_CLEAR) { banner = 90; }
+            if (banner > 0) { banner--; }
+            if (ev & EV_PHASE_CLEAR) { banner = 60; }
             if (ev & EV_GAME_OVER) {
                 ui = UI_OVER; ui_t0 = now; new_best = g.score > hi;
                 if (new_best) { hi = g.score; hi_save(hi); }
@@ -244,21 +273,10 @@ void app_main(void) {
             if (tx >= BTN_AX && tx < BTN_AX + BTN_W && ty >= BTN_Y && ty < BTN_Y + BTN_H) { game_continue(&g); ui = UI_PLAY; board_beep(0, 60); }
             else if (tx >= BTN_BX && tx < BTN_BX + BTN_W && ty >= BTN_Y && ty < BTN_Y + BTN_H) { game_init(&g, (uint32_t)now, 0); ui = UI_PLAY; board_beep(0, 60); }
         }
+        xSemaphoreTake(s_view_mx, portMAX_DELAY);
+        s_view.g = g; s_view.ui = ui; s_view.in = in; s_view.hi = hi; s_view.idle = idle; s_view.new_best = new_best; s_view.banner = banner;
+        xSemaphoreGive(s_view_mx);
 
-        if (now - last_present >= 30000) {                            // draw ~30 fps, logic stays at 60 Hz
-            fb = board_back_buffer();
-            if (fb) {
-                if (ui == UI_TITLE) { world_room(idle * 3); controls(&in); title_screen(idle, hi); }
-                else {
-                    play_scene(&g, hi, &in);
-                    if (banner > 0) { banner--; text(&font_big, 240, 150, "FASE COMPLETA!", RGB(255, 230, 90), true); text(&font_small, 240, 192, "PHASE CLEAR!", RGB(255, 255, 255), true); }
-                    if (ui == UI_OVER) { over_screen(&g, hi, new_best); }
-                }
-                board_flip();
-            }
-            last_present = now; frames++;
-        }
-        if (now - fps_t >= 1000000) { fps = frames; frames = 0; fps_t = now; ESP_LOGI(TAG, "fps %d score %u phase %d", fps, (unsigned)g.score, g.phase + 1); }
         next += dt; int64_t wait = next - esp_timer_get_time();
         if (wait > 1000) { vTaskDelay(pdMS_TO_TICKS(wait / 1000)); } else if (wait < -100000) { next = esp_timer_get_time(); }
     }
