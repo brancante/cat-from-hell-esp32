@@ -180,9 +180,9 @@ esp_err_t board_init(void) {
     ch32_out(CH32_OUT_SAFE); ch32_write(CH32_REG_DIR, CH32_DIR_SAFE);
     vTaskDelay(pdMS_TO_TICKS(20));
     ch32_out(CH32_OUT_SAFE & ~(1u << CH32_BIT_LCD_RST));
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(50));
     ch32_out(CH32_OUT_SAFE);
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(200));
     ch32_write(CH32_REG_BL_PWM, BL_PWM_DEFAULT);
 
     // Touch: GT911 answers at 0x5D or 0x14.
@@ -214,18 +214,32 @@ esp_err_t board_init(void) {
     ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
     ESP_LOGI(TAG, "display ready");
-    board_beep(0, 120);                                      // boot beep
+    board_beep(0, 60);                                       // boot beep
     return ESP_OK;
 }
 
 // Two full 480x480 frame buffers in PSRAM: draw into the hidden one, then board_flip() shows it.
-static uint16_t *s_fbs[2]; static int s_back = 1;
+// The driver only switches buffers at the next frame start, so before drawing into the old (still scanned) buffer
+// we wait for that vsync; otherwise half a frame of the next image shows up as flicker.
+static uint16_t *s_fbs[2]; static int s_back = 1; static SemaphoreHandle_t s_vsync; static volatile bool s_swap_pending;
+static bool IRAM_ATTR on_vsync(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_event_data_t *ed, void *ctx) {
+    BaseType_t hp = pdFALSE;
+    if (s_swap_pending) { s_swap_pending = false; xSemaphoreGiveFromISR(s_vsync, &hp); }
+    return hp == pdTRUE;
+}
 uint16_t *board_back_buffer(void) {
-    if (!s_fbs[0] && s_panel) { void *a = NULL, *b = NULL; esp_lcd_rgb_panel_get_frame_buffer(s_panel, 2, &a, &b); s_fbs[0] = a; s_fbs[1] = b; }
+    if (!s_fbs[0] && s_panel) {
+        void *a = NULL, *b = NULL; esp_lcd_rgb_panel_get_frame_buffer(s_panel, 2, &a, &b); s_fbs[0] = a; s_fbs[1] = b;
+        s_vsync = xSemaphoreCreateBinary();
+        esp_lcd_rgb_panel_event_callbacks_t cb = { .on_vsync = on_vsync };
+        esp_lcd_rgb_panel_register_event_callbacks(s_panel, &cb, NULL);
+    }
+    if (s_swap_pending) { xSemaphoreTake(s_vsync, pdMS_TO_TICKS(60)); s_swap_pending = false; }   // wait until the last flip is on screen
     return s_fbs[s_back];
 }
 void board_flip(void) {
     if (!s_panel || !s_fbs[s_back]) return;
+    s_swap_pending = true;
     esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fbs[s_back]);   // own buffer: the driver just switches to it
     s_back ^= 1;
 }
