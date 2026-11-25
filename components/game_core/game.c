@@ -56,6 +56,13 @@ void game_init(game_t *g, uint32_t seed, uint8_t start_phase) {
     g->spawn_in = 60 * GAME_Q;
 }
 
+// Continue after game over: same phase from its start, full lives, score kept (a small penalty keeps it fair).
+void game_continue(game_t *g) {
+    uint32_t score = g->score, seed = g->rng ^ g->tick; uint8_t ph = g->phase; uint16_t memes = g->unlocked_memes;
+    game_init(g, seed, ph);
+    g->score = score - score / 10; g->unlocked_memes = memes; g->invuln = 120;
+}
+
 static bool overlap(int32_t ax, int32_t ay, int aw, int ah, const game_obj_t *o) {
     int32_t ax2 = ax + aw * GAME_Q, ay2 = ay + ah * GAME_Q;
     int32_t bx2 = o->x + o->w * GAME_Q, by2 = o->y + o->h * GAME_Q;
@@ -86,6 +93,7 @@ uint32_t game_step(game_t *g, game_input_t in) {
     g->events = 0;
     if (g->over) return g->events;
     g->tick++;
+    if (g->tick % 20 == 0) g->score++;                  // distance points
     const int speed = game_speed_q8(g->phase);
 
     // ---- input: jump ----

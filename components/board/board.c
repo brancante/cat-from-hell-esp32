@@ -20,7 +20,6 @@ static SemaphoreHandle_t s_i2c_lock;
 static uint8_t s_out = CH32_OUT_SAFE;
 static esp_timer_handle_t s_beep_timer;
 static esp_lcd_panel_handle_t s_panel;
-static uint16_t *s_strip;                 // pixel-doubling strip in SRAM
 
 // ---------------------------------------------------------------- I2C helpers (all calls serialised)
 static esp_err_t i2c_tx(i2c_master_dev_handle_t d, const uint8_t *b, size_t n) {
@@ -206,7 +205,7 @@ esp_err_t board_init(void) {
                      .hsync_pulse_width = LCD_HS_PW, .hsync_back_porch = LCD_HS_BP, .hsync_front_porch = LCD_HS_FP,
                      .vsync_pulse_width = LCD_VS_PW, .vsync_back_porch = LCD_VS_BP, .vsync_front_porch = LCD_VS_FP,
                      .flags = { .hsync_idle_low = 0, .vsync_idle_low = 0, .de_idle_high = 0, .pclk_active_neg = 0, .pclk_idle_high = 0 } },
-        .data_width = 16, .bits_per_pixel = 16, .num_fbs = 1, .bounce_buffer_size_px = LCD_W * 10,
+        .data_width = 16, .bits_per_pixel = 16, .num_fbs = 2, .bounce_buffer_size_px = LCD_W * 10,
         .hsync_gpio_num = PIN_LCD_HSYNC, .vsync_gpio_num = PIN_LCD_VSYNC, .de_gpio_num = PIN_LCD_DE,
         .pclk_gpio_num = PIN_LCD_PCLK, .disp_gpio_num = -1, .data_gpio_nums = PIN_LCD_D,
         .flags = { .fb_in_psram = 1 },
@@ -214,23 +213,19 @@ esp_err_t board_init(void) {
     ESP_ERROR_CHECK(esp_lcd_new_rgb_panel(&pc, &s_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
-    s_strip = heap_caps_malloc(LCD_W * 32 * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (!s_strip) return ESP_ERR_NO_MEM;
     ESP_LOGI(TAG, "display ready");
     board_beep(0, 120);                                      // boot beep
     return ESP_OK;
 }
 
-// 240x240 RGB565 -> 480x480, 16 source rows (32 output rows) per strip.
-void board_present(const uint16_t *fb) {
-    if (!s_panel || !s_strip) return;
-    for (int y0 = 0; y0 < 240; y0 += 16) {
-        for (int r = 0; r < 16; r++) {
-            const uint16_t *src = fb + (y0 + r) * 240;
-            uint16_t *d0 = s_strip + (r * 2) * LCD_W, *d1 = d0 + LCD_W;
-            for (int x = 0; x < 240; x++) { uint16_t p = src[x]; d0[2 * x] = d0[2 * x + 1] = p; }
-            memcpy(d1, d0, LCD_W * sizeof(uint16_t));
-        }
-        esp_lcd_panel_draw_bitmap(s_panel, 0, y0 * 2, LCD_W, y0 * 2 + 32, s_strip);
-    }
+// Two full 480x480 frame buffers in PSRAM: draw into the hidden one, then board_flip() shows it.
+static uint16_t *s_fbs[2]; static int s_back = 1;
+uint16_t *board_back_buffer(void) {
+    if (!s_fbs[0] && s_panel) { void *a = NULL, *b = NULL; esp_lcd_rgb_panel_get_frame_buffer(s_panel, 2, &a, &b); s_fbs[0] = a; s_fbs[1] = b; }
+    return s_fbs[s_back];
+}
+void board_flip(void) {
+    if (!s_panel || !s_fbs[s_back]) return;
+    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fbs[s_back]);   // own buffer: the driver just switches to it
+    s_back ^= 1;
 }

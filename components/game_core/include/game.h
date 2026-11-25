@@ -54,6 +54,7 @@ typedef struct {
 } game_t;
 
 void game_init(game_t *g, uint32_t seed, uint8_t start_phase);
+void game_continue(game_t *g);   // after game over: restart the current phase, full lives, score kept (-10%)
 // Advance one fixed step (1/60 s). Returns the event mask for this step (sound, effects).
 uint32_t game_step(game_t *g, game_input_t in);
 
