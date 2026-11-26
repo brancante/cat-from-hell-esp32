@@ -2,7 +2,7 @@
 #include <string.h>
 
 // ---- tunables (see plan: speed 1.0x .. 1.6x, shorter gaps each phase) ----
-#define BASE_SPEED_Q8   (4 * GAME_Q)            // 4 px/step = 240 px/s at 1.0x
+#define BASE_SPEED_Q8   (16 * GAME_Q / 5)       // 3.2 px/step = 192 px/s in phase 1; reaches 4 px/step around phase 4
 #define CAT_X           48
 #define CAT_W           24
 #define CAT_H           20
@@ -14,7 +14,7 @@
 #define TAP_WINDOW_STEPS 36                      // 0.6 s
 #define PHASE_SECONDS   30
 #define NAIL_SPEED_Q8   (6 * GAME_Q)
-#define SPEED_PCT(p)    (100 + (p) * 5 + ((p) >= 11 ? 5 : 0))   // 100..160
+#define SPEED_PCT(p)    (100 + (p) * 8)                         // 100..188 %
 
 static uint32_t rnd(game_t *g) { uint32_t x = g->rng; x ^= x << 13; x ^= x >> 17; x ^= x << 5; return g->rng = x ? x : 1; }
 

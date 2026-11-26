@@ -53,8 +53,8 @@ static void test_head_bounce(void) {
     assert(ev & EV_HEAD_BOUNCE); assert(g.cat_vy < 0); assert(g.lives == 3);
 }
 static void test_difficulty_grows(void) {
-    for (int p = 1; p < GAME_PHASES; p++) { assert(game_speed_q8(p) > game_speed_q8(p - 1)); assert(game_spawn_gap_px(p) <= game_spawn_gap_px(p - 1)); }
-    assert(game_speed_q8(11) == game_speed_q8(0) * 160 / 100);
+    for (int p = 1; p < GAME_PHASES; p++) { assert(game_speed_q8(p) > game_speed_q8(p - 1)); assert(game_spawn_gap_px(p) * GAME_Q / game_speed_q8(p) <= game_spawn_gap_px(p - 1) * GAME_Q / game_speed_q8(p - 1));   // less running time between obstacle groups }
+    assert(game_speed_q8(11) == game_speed_q8(0) * 188 / 100);
 }
 static void test_phase_and_meme(void) {
     game_t g; game_init(&g, 7, 2);
