@@ -218,27 +218,8 @@ esp_err_t board_init(void) {
     return ESP_OK;
 }
 
-// The game draws into a private 480x480 buffer in PSRAM. board_flip() waits for the panel's vsync and then copies it into the
-// panel's single frame buffer right at the start of a refresh: the copy (about 10 ms) is faster than the scan-out (about 24 ms),
-// so the panel never shows a half-old, half-new frame.
-static uint16_t *s_back; static SemaphoreHandle_t s_vsync; static volatile bool s_waiting;
-static bool IRAM_ATTR on_vsync(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_event_data_t *ed, void *ctx) {
-    BaseType_t hp = pdFALSE;
-    if (s_waiting) { s_waiting = false; xSemaphoreGiveFromISR(s_vsync, &hp); }
-    return hp == pdTRUE;
-}
-uint16_t *board_back_buffer(void) {
-    if (!s_back && s_panel) {
-        s_back = heap_caps_aligned_calloc(64, 1, LCD_W * LCD_H * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        s_vsync = xSemaphoreCreateBinary();
-        esp_lcd_rgb_panel_event_callbacks_t cb = { .on_vsync = on_vsync };
-        esp_lcd_rgb_panel_register_event_callbacks(s_panel, &cb, NULL);
-    }
-    return s_back;
-}
-void board_flip(void) {
-    if (!s_panel || !s_back) return;
-    xSemaphoreTake(s_vsync, 0); s_waiting = true;
-    xSemaphoreTake(s_vsync, pdMS_TO_TICKS(60)); s_waiting = false;           // start of a new refresh
-    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_back);
+// The game draws one horizontal band at a time in fast internal RAM and sends it to the panel's frame buffer.
+void board_draw_band(const uint16_t *px, int y0, int rows) {
+    if (!s_panel) return;
+    esp_lcd_panel_draw_bitmap(s_panel, 0, y0, LCD_W, y0 + rows, px);
 }

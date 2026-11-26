@@ -21,14 +21,17 @@ static const char *TAG = "cat";
 #define FLOOR_Y (GAME_GROUND_Y * 2)                      // 360
 #define RGB(r, g, b) ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
 
-static uint16_t *fb;                                     // current back buffer
+#define BH 48                                            // rows per band: the whole frame is drawn in 10 bands in internal RAM
+static uint16_t *fb;                                     // band buffer (BH rows of 480 px)
+static int band_y;                                       // first screen row of the band being drawn
 
 // ---------------------------------------------------------------- drawing helpers (physical pixels)
 static void rect(int x, int y, int w, int h, uint16_t c) {
+    y -= band_y;
     if (x < 0) { w += x; x = 0; }
     if (y < 0) { h += y; y = 0; }
     if (x + w > W) { w = W - x; }
-    if (y + h > H) { h = H - y; }
+    if (y + h > BH) { h = BH - y; }
     if (w <= 0 || h <= 0) { return; }
     for (int j = 0; j < h; j++) { uint16_t *p = &fb[(y + j) * W + x]; for (int i = 0; i < w; i++) { p[i] = c; } }
 }
@@ -40,7 +43,7 @@ static void circle(int cx, int cy, int r, uint16_t c) {
 }
 static void blit(const sprite_t *sp, int x, int y) {           // x,y physical top-left
     for (int j = 0; j < sp->h; j++) {
-        int yy = y + j; if (yy < 0 || yy >= H) { continue; }
+        int yy = y + j - band_y; if (yy < 0 || yy >= BH) { continue; }
         for (int i = 0; i < sp->w; i++) {
             int xx = x + i; if (xx < 0 || xx >= W) { continue; }
             uint16_t p = sp->px[j * sp->w + i];
@@ -59,7 +62,7 @@ static void glyphs(const font_t *f, int x, int y, const char *s, uint16_t col) {
         if (*s < 32 || *s > 126) { continue; }
         const glyph_t *g = &f->g[*s - 32];
         for (int j = 0; j < g->h; j++) {
-            int yy = base + g->y + j; if (yy < 0 || yy >= H) { continue; }
+            int yy = base + g->y + j - band_y; if (yy < 0 || yy >= BH) { continue; }
             for (int i = 0; i < g->w; i++) {
                 int xx = x + g->x + i; uint8_t a = f->a[g->off + j * g->w + i];
                 if (!a || xx < 0 || xx >= W) { continue; }
@@ -80,7 +83,7 @@ static void world_room(uint32_t scroll) {
     static uint16_t row[W];
     uint32_t par = scroll / 4;
     for (int x = 0; x < W; x++) { row[x] = (((x + par) / 48) & 1) ? RGB(250, 224, 182) : RGB(255, 238, 205); }
-    for (int y = 0; y < 348; y++) { memcpy(&fb[y * W], row, sizeof row); }
+    for (int y = band_y; y < band_y + BH && y < 348; y++) { memcpy(&fb[(y - band_y) * W], row, sizeof row); }
     rect(0, 0, W, 14, RGB(214, 170, 120)); rect(0, 14, W, 3, RGB(176, 128, 84));            // ceiling edge
     // decorations scroll slowly (parallax); period 760 px
     const int items[3] = { 120, 380, 610 };
@@ -148,11 +151,12 @@ static void play_scene(const game_t *g, uint32_t hi, const game_input_t *in) {
         int ox = o->x / GAME_Q, oy = o->y / GAME_Q, lw = sp->w / 2, lh = sp->h / 2;
         int x = ox + (o->w - lw) / 2;
         int y = (o->type == OBJ_HIGH) ? oy : (o->type == OBJ_PIZZA || o->type == OBJ_ROCKET) ? oy + (o->h - lh) / 2 : oy + o->h - lh;   // lamp hangs, flyers centred, the rest stand on the floor
+        if (o->type == OBJ_HIGH) { rect(x * 2 + 31, 17, 3, y * 2 - 17, RGB(20, 10, 10)); }   // lamp cord up to the ceiling
         blit(sp, x * 2, y * 2);
     }
     for (int i = 0; i < GAME_MAX_NAILS; i++) { if (g->nail[i].active) { blit(&spr_fx_nail, g->nail[i].x / GAME_Q * 2, (g->nail[i].y / GAME_Q - 1) * 2); } }
     if (!(g->invuln && (g->tick & 4))) {
-        const sprite_t *cs = g->state == CAT_DUCK ? &spr_cat_duck : g->state == CAT_JUMP ? &spr_cat_jump : g->strike_timer ? &spr_cat_strike : ((g->tick / 6) & 1) ? &spr_cat_run1 : &spr_cat_run0;
+        const sprite_t *cs = g->state == CAT_DUCK ? &spr_cat_duck : g->state == CAT_JUMP ? &spr_cat_jump : g->strike_timer ? &spr_cat_strike : ((g->tick / 4) & 1) ? &spr_cat_run1 : &spr_cat_run0;
         int hh = g->state == CAT_DUCK ? 10 : 20;
         blit(cs, 80, (g->cat_y / GAME_Q + hh - 30) * 2);
     }
@@ -217,19 +221,20 @@ static view_t s_view; static SemaphoreHandle_t s_view_mx;
 
 // Render task (core 1): draws the latest snapshot at the display's pace; game logic keeps its own steady 60 Hz on core 0.
 static void render_task(void *arg) {
+    static uint16_t band_buf[W * BH]; fb = band_buf;
     static view_t v; int64_t fps_t = esp_timer_get_time(); int frames = 0;
     for (;;) {
         xSemaphoreTake(s_view_mx, portMAX_DELAY); v = s_view; xSemaphoreGive(s_view_mx);
-        fb = board_back_buffer();
-        if (fb) {
+        for (band_y = 0; band_y < H; band_y += BH) {
             if (v.ui == UI_TITLE) { world_room(v.idle * 3); controls(&v.in); title_screen(v.idle, v.hi); }
             else {
                 play_scene(&v.g, v.hi, &v.in);
                 if (v.banner > 0) { text(&font_big, 240, 150, "FASE COMPLETA!", RGB(255, 230, 90), true); text(&font_small, 240, 192, "PHASE CLEAR!", RGB(255, 255, 255), true); }
                 if (v.ui == UI_OVER) { over_screen(&v.g, v.hi, v.new_best); }
             }
-            board_flip(); frames++;
-        } else { vTaskDelay(pdMS_TO_TICKS(10)); }
+            board_draw_band(fb, band_y, BH);
+        }
+        frames++; vTaskDelay(1);                                   // yield so the idle task (watchdog) runs
         int64_t now = esp_timer_get_time();
         if (now - fps_t >= 1000000) { ESP_LOGI(TAG, "fps %d score %u phase %d", frames, (unsigned)v.g.score, v.g.phase + 1); frames = 0; fps_t = now; }
     }

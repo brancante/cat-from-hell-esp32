@@ -2,24 +2,25 @@
 #include <string.h>
 
 // ---- tunables (see plan: speed 1.0x .. 1.6x, shorter gaps each phase) ----
-#define BASE_SPEED_Q8   (3 * GAME_Q)            // 3 px/step = 180 px/s at 1.0x
+#define BASE_SPEED_Q8   (4 * GAME_Q)            // 4 px/step = 240 px/s at 1.0x
 #define CAT_X           48
 #define CAT_W           24
 #define CAT_H           20
-#define CAT_DUCK_H      10
-#define GRAVITY_Q8      77                       // 0.30 px/step^2
-#define JUMP_V_Q8       (-5 * GAME_Q)
+#define CAT_DUCK_H      12
+#define GRAVITY_Q8      100                      // 0.39 px/step^2
+#define JUMP_V_Q8       (-13 * GAME_Q / 2)        // -6.5 px/step: apex about 54 px
 #define BOUNCE_V_Q8     (-8 * GAME_Q)            // head bounce
 #define STRIKE_STEPS    12
 #define TAP_WINDOW_STEPS 36                      // 0.6 s
-#define PHASE_SECONDS   60
+#define PHASE_SECONDS   30
 #define NAIL_SPEED_Q8   (6 * GAME_Q)
 #define SPEED_PCT(p)    (100 + (p) * 5 + ((p) >= 11 ? 5 : 0))   // 100..160
 
 static uint32_t rnd(game_t *g) { uint32_t x = g->rng; x ^= x << 13; x ^= x >> 17; x ^= x << 5; return g->rng = x ? x : 1; }
 
 int game_speed_q8(uint8_t phase) { return (BASE_SPEED_Q8 * SPEED_PCT(phase)) / 100; }
-int game_spawn_gap_px(uint8_t phase) { int gap = 150 - phase * 8; return gap < 70 ? 70 : gap; }
+static int gap_steps(uint8_t phase) { int g = 54 - phase * 3; return g < 20 ? 20 : g; }      // empty running time between obstacle groups
+int game_spawn_gap_px(uint8_t phase) { return game_speed_q8(phase) * gap_steps(phase) / GAME_Q; }
 
 int game_taps_to_slices(int taps, int window_steps) {
     if (taps <= 0) return 0;
@@ -29,22 +30,42 @@ int game_taps_to_slices(int taps, int window_steps) {
     return slices > GAME_MAX_SLICES ? GAME_MAX_SLICES : slices;
 }
 
-static void spawn(game_t *g, obj_type_t t, int w, int h, int y_px) {
+static void spawn_at(game_t *g, obj_type_t t, int w, int h, int y_px, int dx_steps) {      // dx_steps: running time after the group starts
+    int dx = game_speed_q8(g->phase) * dx_steps / GAME_Q;
     for (int i = 0; i < GAME_MAX_OBJ; i++) if (g->obj[i].type == OBJ_NONE) {
-        g->obj[i] = (game_obj_t){ t, (GAME_W + 8) * GAME_Q, y_px * GAME_Q, (int16_t)w, (int16_t)h };
+        g->obj[i] = (game_obj_t){ t, (GAME_W + 8 + dx) * GAME_Q, y_px * GAME_Q, (int16_t)w, (int16_t)h };
         return;
     }
 }
+#define GY GAME_GROUND_Y
+#define CUSHION(dx) spawn_at(g, OBJ_LOW, 18, 16, GY - 16, dx)                 // jump over
+#define LAMP(dx)    spawn_at(g, OBJ_HIGH, 24, 22, GY - 38, dx)                // duck under (hangs from the ceiling)
+#define VASE(dx)    spawn_at(g, OBJ_BREAKABLE, 16, 20, GY - 20, dx)           // strike it
+#define HUMAN(dx)   spawn_at(g, OBJ_HUMAN, 18, 38, GY - 38, dx)               // jump on its head
+#define ROCKET(dy, dx) spawn_at(g, OBJ_ROCKET, 22, 16, GY - 34 - (dy), dx)    // low flyer: duck it or strike it
+#define PIZZA(y, dx) spawn_at(g, OBJ_PIZZA, 12, 12, (y), dx)
 
+// One obstacle group per call, picked from patterns that need different answers (jump, duck, strike, head bounce).
 static void spawn_next(game_t *g) {
-    uint32_t r = rnd(g) % 100;
     int ph = g->phase;
-    if (r < 28)       spawn(g, OBJ_LOW, 18, 16, GAME_GROUND_Y - 16);                 // jump over
-    else if (r < 46 && ph >= 1) spawn(g, OBJ_HIGH, 24, 12, GAME_GROUND_Y - 34);       // duck under
-    else if (r < 66)  spawn(g, OBJ_BREAKABLE, 16, 18, GAME_GROUND_Y - 18);            // strike it
-    else if (r < 78 && ph >= 2) spawn(g, OBJ_HUMAN, 20, 44, GAME_GROUND_Y - 44);      // jump on its head
-    else if (r < 90 && ph >= 3) spawn(g, OBJ_ROCKET, 22, 14, GAME_GROUND_Y - 30 - (int)(rnd(g) % 3) * 8);
-    else              spawn(g, OBJ_PIZZA, 12, 12, GAME_GROUND_Y - 22 - (int)(rnd(g) % 3) * 14);
+    for (;;) {
+        int pat = (int)(rnd(g) % 12);
+        switch (pat) {
+        case 0: CUSHION(0); PIZZA(GY - 52, 2); break;
+        case 1: LAMP(0); break;
+        case 2: VASE(0); PIZZA(GY - 14, 14); break;
+        case 3: HUMAN(0); PIZZA(GY - 78, 1); break;                        // bounce on the head, grab the pizza above
+        case 4: CUSHION(0); CUSHION(9); break;                            // two in a row: hold jump or double jump
+        case 5: if (ph < 1) continue; CUSHION(0); LAMP(40); break;         // jump, then duck
+        case 6: if (ph < 1) continue; LAMP(0); VASE(22); break;            // duck, then strike
+        case 7: if (ph < 1) continue; ROCKET(0, 0); break;
+        case 8: if (ph < 2) continue; HUMAN(0); LAMP(46); break;           // bounce, then duck
+        case 9: if (ph < 2) continue; VASE(0); HUMAN(24); break;           // strike, then bounce
+        case 10: if (ph < 3) continue; ROCKET(0, 0); CUSHION(30); break;
+        default: PIZZA(GY - 24, 0); PIZZA(GY - 38, 4); PIZZA(GY - 24, 8); VASE(22); break;
+        }
+        return;
+    }
 }
 
 void game_init(game_t *g, uint32_t seed, uint8_t start_phase) {
@@ -53,7 +74,7 @@ void game_init(game_t *g, uint32_t seed, uint8_t start_phase) {
     g->lives = 3; g->phase = start_phase;
     g->cat_y = (GAME_GROUND_Y - CAT_H) * GAME_Q; g->on_ground = true; g->state = CAT_RUN;
     g->phase_len = (int32_t)((int64_t)game_speed_q8(start_phase) * GAME_STEP_HZ * PHASE_SECONDS);
-    g->spawn_in = 60 * GAME_Q;
+    g->spawn_in = 40 * GAME_Q;
 }
 
 // Continue after game over: same phase from its start, full lives, score kept (a small penalty keeps it fair).
@@ -129,14 +150,14 @@ uint32_t game_step(game_t *g, game_input_t in) {
         g->cat_y += g->cat_vy;
     }
     int32_t floor_y = (GAME_GROUND_Y - ch) * GAME_Q;
-    if (g->cat_y >= floor_y) { g->cat_y = floor_y; g->cat_vy = 0; g->on_ground = true; }
+    if (g->on_ground || g->cat_y >= floor_y) { g->cat_y = floor_y; g->cat_vy = 0; g->on_ground = true; }   // standing snaps to the floor (also when ducking)
     int32_t top = g->cat_y;
     if (g->invuln) g->invuln--;
     g->state = g->invuln > 40 ? CAT_HURT : !g->on_ground ? CAT_JUMP : in.duck ? CAT_DUCK : g->strike_timer ? CAT_STRIKE : CAT_RUN;
 
     // ---- world scroll, spawn ----
     g->distance += speed;
-    if (g->spawn_in <= (uint32_t)speed) { spawn_next(g); g->spawn_in = (uint32_t)game_spawn_gap_px(g->phase) * GAME_Q + (rnd(g) % 40) * GAME_Q; }
+    if (g->spawn_in <= (uint32_t)speed) { spawn_next(g); g->spawn_in = (uint32_t)game_spawn_gap_px(g->phase) * GAME_Q + (rnd(g) % 30) * GAME_Q; }
     else g->spawn_in -= (uint32_t)speed;
 
     // ---- nails ----
