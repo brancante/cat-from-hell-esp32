@@ -45,6 +45,8 @@ typedef struct {
     int32_t phase_len;               // Q8 px
     uint32_t rng, spawn_in;          // deterministic generator
     uint32_t tick;
+    bool duck_prev;                  // duck button edge detection
+    int16_t duck_hold;               // a tap keeps the cat down for a moment
     bool over;
     uint16_t unlocked_memes;         // bit n = meme n unlocked
     game_obj_t obj[GAME_MAX_OBJ];
@@ -54,6 +56,7 @@ typedef struct {
 } game_t;
 
 void game_init(game_t *g, uint32_t seed, uint8_t start_phase);
+void game_continue(game_t *g);   // after game over: restart the current phase, full lives, score kept (-10%)
 // Advance one fixed step (1/60 s). Returns the event mask for this step (sound, effects).
 uint32_t game_step(game_t *g, game_input_t in);
 
