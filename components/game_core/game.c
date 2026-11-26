@@ -6,7 +6,8 @@
 #define CAT_X           48
 #define CAT_W           24
 #define CAT_H           20
-#define CAT_DUCK_H      12
+#define CAT_DUCK_H      10
+#define DUCK_HOLD_STEPS 24                       // 0.4 s: a quick tap is enough
 #define GRAVITY_Q8      100                      // 0.39 px/step^2
 #define JUMP_V_Q8       (-13 * GAME_Q / 2)        // -6.5 px/step: apex about 54 px
 #define BOUNCE_V_Q8     (-8 * GAME_Q)            // head bounce
@@ -39,7 +40,7 @@ static void spawn_at(game_t *g, obj_type_t t, int w, int h, int y_px, int dx_ste
 }
 #define GY GAME_GROUND_Y
 #define CUSHION(dx) spawn_at(g, OBJ_LOW, 18, 16, GY - 16, dx)                 // jump over
-#define LAMP(dx)    spawn_at(g, OBJ_HIGH, 24, 22, GY - 38, dx)                // duck under (hangs from the ceiling)
+#define LAMP(dx)    spawn_at(g, OBJ_HIGH, 20, 22, GY - 40, dx)                // duck under (hangs from the ceiling)
 #define VASE(dx)    spawn_at(g, OBJ_BREAKABLE, 16, 20, GY - 20, dx)           // strike it
 #define HUMAN(dx)   spawn_at(g, OBJ_HUMAN, 18, 38, GY - 38, dx)               // jump on its head
 #define ROCKET(dy, dx) spawn_at(g, OBJ_ROCKET, 22, 16, GY - 34 - (dy), dx)    // low flyer: duck it or strike it
@@ -56,10 +57,10 @@ static void spawn_next(game_t *g) {
         case 2: VASE(0); PIZZA(GY - 14, 14); break;
         case 3: HUMAN(0); PIZZA(GY - 78, 1); break;                        // bounce on the head, grab the pizza above
         case 4: CUSHION(0); CUSHION(9); break;                            // two in a row: hold jump or double jump
-        case 5: if (ph < 1) continue; CUSHION(0); LAMP(40); break;         // jump, then duck
+        case 5: if (ph < 1) continue; CUSHION(0); LAMP(52); break;         // jump, then duck
         case 6: if (ph < 1) continue; LAMP(0); VASE(22); break;            // duck, then strike
         case 7: if (ph < 1) continue; ROCKET(0, 0); break;
-        case 8: if (ph < 2) continue; HUMAN(0); LAMP(46); break;           // bounce, then duck
+        case 8: if (ph < 2) continue; HUMAN(0); LAMP(60); break;           // bounce, then duck
         case 9: if (ph < 2) continue; VASE(0); HUMAN(24); break;           // strike, then bounce
         case 10: if (ph < 3) continue; ROCKET(0, 0); CUSHION(30); break;
         default: PIZZA(GY - 24, 0); PIZZA(GY - 38, 4); PIZZA(GY - 24, 8); VASE(22); break;
@@ -143,8 +144,12 @@ uint32_t game_step(game_t *g, game_input_t in) {
     if (g->strike_timer) g->strike_timer--;
 
     // ---- cat physics ----
+    if (in.duck && !g->duck_prev) g->duck_hold = DUCK_HOLD_STEPS;
+    g->duck_prev = in.duck;
+    if (g->duck_hold > 0) g->duck_hold--;
+    const bool ducking = in.duck || g->duck_hold > 0;
     int ch = CAT_H;
-    if (in.duck && g->on_ground) ch = CAT_DUCK_H;
+    if (ducking && g->on_ground) ch = CAT_DUCK_H;
     if (!g->on_ground) {
         g->cat_vy += GRAVITY_Q8; if (in.duck) g->cat_vy += GRAVITY_Q8;   // duck in the air drops faster
         g->cat_y += g->cat_vy;
@@ -153,7 +158,7 @@ uint32_t game_step(game_t *g, game_input_t in) {
     if (g->on_ground || g->cat_y >= floor_y) { g->cat_y = floor_y; g->cat_vy = 0; g->on_ground = true; }   // standing snaps to the floor (also when ducking)
     int32_t top = g->cat_y;
     if (g->invuln) g->invuln--;
-    g->state = g->invuln > 40 ? CAT_HURT : !g->on_ground ? CAT_JUMP : in.duck ? CAT_DUCK : g->strike_timer ? CAT_STRIKE : CAT_RUN;
+    g->state = g->invuln > 40 ? CAT_HURT : !g->on_ground ? CAT_JUMP : ducking ? CAT_DUCK : g->strike_timer ? CAT_STRIKE : CAT_RUN;
 
     // ---- world scroll, spawn ----
     g->distance += speed;

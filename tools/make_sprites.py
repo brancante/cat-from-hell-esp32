@@ -14,18 +14,18 @@ def cat(legs="a", strike=False, duck=False, jump=False):
     # duck=True draws a real crouch: belly almost on the floor, legs folded, head and tail low.
     legs_svg = {"a": [(11, 22, 4, 8), (28, 22, 4, 8)], "b": [(8, 22, 4, 8), (31, 22, 4, 8)],
                 "j": [(6, 21, 4, 6), (33, 21, 4, 6)]}[legs if not jump else "j"]
-    body_y, body_h = (19, 9) if duck else (14, 11)
-    if duck: legs_svg = [(9, 26, 6, 4), (28, 26, 6, 4)]
+    body_y, body_h = (21, 8) if duck else (14, 11)
+    if duck: legs_svg = [(9, 27, 6, 3), (28, 27, 6, 3)]
     g = '<g>'
-    g += f'<g transform="translate(0,{5 if duck else 0})"><path d="M6 20 C0 14 2 6 7 2 L9 6 L7 9 L11 10 L9 14 L13 15 Z" fill="{OR}" stroke-width="1.2" {S}/>'
+    g += f'<g transform="translate(0,{8 if duck else 0})"><path d="M6 20 C0 14 2 6 7 2 L9 6 L7 9 L11 10 L9 14 L13 15 Z" fill="{OR}" stroke-width="1.2" {S}/>'
     g += f'<path d="M3 11 l4 1 l-3 2z M5 6 l3 1 l-3 2z" fill="{GR}"/></g>'
     g += f'<rect x="9" y="{body_y}" width="21" height="{body_h}" rx="4" fill="{OR}" stroke-width="1.2" {S}/>'
     for (lx, lyy, lw, lh) in legs_svg:
         g += f'<rect x="{lx}" y="{lyy}" width="{lw}" height="{lh}" rx="1.5" fill="{OR}" stroke-width="1.2" {S}/><ellipse cx="{lx+lw/2}" cy="{lyy+lh}" rx="3.2" ry="1.4" fill="{WH}" stroke-width="1" {S}/>'
     g += f'<path d="M14 {body_y} l1.4 4 l1.8 -4z M19 {body_y} l1.4 4 l1.8 -4z M24 {body_y} l1.4 4 l1.8 -4z" fill="{GR}"/>'
-    belly = 26 if duck else 22
+    belly = 27 if duck else 22
     g += f'<path d="M12 {belly} Q20 {belly+2.5} 28 {belly}" fill="#ffd9a0" stroke="none"/>'
-    hd = '<g transform="translate(1,6)">' if duck else '<g>'
+    hd = '<g transform="translate(2,13) scale(0.9,0.7)">' if duck else '<g>'
     g += hd
     g += f'<path d="M25 8 L26 1 L30 5 Z M35 5 L38 1 L38 8 Z" fill="{OR}" stroke-width="1.2" {S}/>'
     g += f'<circle cx="32" cy="13" r="8" fill="{OR}" stroke-width="1.3" {S}/>'

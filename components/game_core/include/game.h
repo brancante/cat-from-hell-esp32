@@ -45,6 +45,8 @@ typedef struct {
     int32_t phase_len;               // Q8 px
     uint32_t rng, spawn_in;          // deterministic generator
     uint32_t tick;
+    bool duck_prev;                  // duck button edge detection
+    int16_t duck_hold;               // a tap keeps the cat down for a moment
     bool over;
     uint16_t unlocked_memes;         // bit n = meme n unlocked
     game_obj_t obj[GAME_MAX_OBJ];
